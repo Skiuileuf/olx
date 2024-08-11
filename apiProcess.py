@@ -1,115 +1,159 @@
 from datetime import datetime, timezone
 import json
 from openpyxl import Workbook
+from openpyxl.cell import Cell
 from openpyxl.utils import datetime as openpyxl_datetime
 from openpyxl.styles import NamedStyle, numbers
-from typing import Callable, Any, Optional
 import glob
+from typing import Callable, Any, Optional
+
+class Column:
+    def __init__(self, title: str, value_func: Callable[[dict], Any], format_func: Optional[Callable] = None):
+        self.title = title
+        self.value_func = value_func
+        self.format_func = format_func
 
 def iso_to_excel_date(iso_string: str) -> float:
-    """
-    Converts an ISO formatted date string to an Excel date.
-    Args:
-        iso_string (str): The ISO formatted date string.
-    Returns:
-        float: The Excel date representation.
-    """
     dt = datetime.fromisoformat(iso_string)
-    
-    # Convert to UTC
     dt_utc = dt.astimezone(timezone.utc)
-    
-    # Remove timezone information to make it naive
     dt_naive = dt_utc.replace(tzinfo=None)
-    
-    # Convert to Excel date
     return openpyxl_datetime.to_excel(dt_naive)
 
+def get_param_value(params, key: str) -> Optional[dict]:
+    return next((param['value'] for param in params if param['key'] == key), None)
 
-def get_param_value(params, key: str) -> dict:
-    for param in params:
-        if param['key'] == key:
-            return param['value']
-    return None  # Return None if the key is not found
+target_lat = 44.55048
+target_lon = 26.09095
 
+def hyperlink(cell: Cell):
+    cell.hyperlink = cell.value
+    cell.style = "Hyperlink"
 
-wb = Workbook()
-ws = wb.active
+# Define column definitions
+columns = [
+    Column(
+        "id", 
+        lambda item: item["id"]
+    ),
+    Column(
+        "url", 
+        lambda item: item["url"], 
+        lambda cell: hyperlink(cell)
+    ),
+    Column(
+        "title", 
+        lambda item: item["title"]
+    ),
+    Column(
+        "last_refresh_time", 
+        lambda item: iso_to_excel_date(item["last_refresh_time"]), 
+        lambda cell: setattr(cell, "style", "datetime")
+    ),
+    Column(
+        "created_time", 
+        lambda item: iso_to_excel_date(item["created_time"]), 
+        lambda cell: setattr(cell, "style", "datetime")
+    ),
+    Column(
+        "description", 
+        lambda item: item["description"]
+    ),
+    Column(
+        "state", 
+        lambda item: get_param_value(item["params"], "state")["label"] if get_param_value(item["params"], "state") else None
+    ),
+    Column(
+        "diagonala", 
+        lambda item: get_param_value(item["params"], "diagonala")["label"] if get_param_value(item["params"], "diagonala") else None
+    ),
+    Column(
+        "producator_procesor", 
+        lambda item: get_param_value(item["params"], "producator_procesor")["label"] if get_param_value(item["params"], "producator_procesor") else None
+    ),
+    Column(
+        "capacitate_memorie_ram", 
+        lambda item: get_param_value(item["params"], "capacitate_memorie_ram")["label"] if get_param_value(item["params"], "capacitate_memorie_ram") else None
+    ),
+    Column(
+        "price", 
+        lambda item: get_param_value(item["params"], "price")["value"] if get_param_value(item["params"], "price") else None
+    ),
+    Column(
+        "currency", 
+        lambda item: get_param_value(item["params"], "price")["currency"] if get_param_value(item["params"], "price") else None
+    ),
+    Column(
+        "negotiable", 
+        lambda item: get_param_value(item["params"], "price")["negotiable"] if get_param_value(item["params"], "price") else None
+    ),
+    Column(
+        "lat", 
+        lambda item: item["map"]["lat"]
+    ),
+    Column(
+        "lon", 
+        lambda item: item["map"]["lon"]
+    ),
+    Column(
+        "distance", lambda item: ((item["map"]["lat"] - target_lat)**2 + (item["map"]["lon"] - target_lon)**2)**0.5
+    ),
+    Column(
+        "city", 
+        lambda item: item["location"]["city"]["name"]
+    ),
+    Column(
+        "region", 
+        lambda item: item["location"]["region"]["name"]
+    ),
+    Column(
+        "days_since_last_refresh", 
+        lambda item: f"=DATEDIF(D{{row}}, TODAY(), \"D\")"
+    ),
+    Column(
+        "days_since_created_time", 
+        lambda item: f"=DATEDIF(E{{row}}, TODAY(), \"D\")"
+    ),
+    Column(
+        "highlighted", 
+        lambda item: item["promotion"]["highlighted"]
+    ),
+]
 
-# Create a new named style for the date format
-date_style = NamedStyle(name='datetime', number_format='YYYY-MM-DD HH:MM:SS')
+def main():
+    wb = Workbook()
+    ws = wb.active
 
-# Add the new style to the workbook
-wb.add_named_style(date_style)
+    date_style = NamedStyle(name='datetime', number_format='YYYY-MM-DD HH:MM:SS')
+    wb.add_named_style(date_style)
 
-# Otopeni coordinates
-otopeni_lat = 44.55048
-otopeni_lon = 26.09095
+    # Write headers
+    ws.append([col.title for col in columns])
 
-current_row: int = 1
+    current_row = 2
 
-ws.append(["id", "url", "title", "last_refresh_time", "created_time", "description", "state", "diagonala", "producator_procesor", "capacitate_memorie_ram", "price", "currency", "negotiable", "lat", "lon", "distance", "city", "region", "days_since_last_refresh", "days_since_created_time", "highlighted"])
-current_row += 1
+    files = glob.glob("api/*.json")
+    for file_path in files:
+        print(file_path)
+        with open(file_path, "rb") as f:
+            data = json.load(f)
 
-files = glob.glob("api/*.json")
-for filePath in files:
-    print(filePath)
-    f = open(filePath, "rb")
-    data = f.read()
+        for item in data["data"]:
+            row = []
+            for col in columns:
+                value = col.value_func(item)
+                if isinstance(value, str) and value.startswith('='):
+                    value = value.format(row=current_row)
+                row.append(value)
 
-    python_obj = json.loads(data)
+            ws.append(row)
 
-    for item in python_obj["data"]:
-        row = []
+            for col_index, col in enumerate(columns, start=1):
+                if col.format_func:
+                    col.format_func(ws.cell(row=current_row, column=col_index))
 
-        row.append(item["id"])
-        row.append(item["url"])
-        row.append(item["title"])
-        row.append(iso_to_excel_date(item["last_refresh_time"]))
-        row.append(iso_to_excel_date(item["created_time"]))
-        row.append(item["description"])
-        
-        state = get_param_value(item["params"], "state")
-        diagonala = get_param_value(item["params"], "diagonala")
-        producator_procesor = get_param_value(item["params"], "producator_procesor")
-        capacitate_memorie_ram = get_param_value(item["params"], "capacitate_memorie_ram")
-        price = get_param_value(item["params"], "price")
+            current_row += 1
 
-        row.append(state["label"] if state else None)
-        row.append(diagonala["label"] if diagonala else None)
-        row.append(producator_procesor["label"] if producator_procesor else None)
-        row.append(capacitate_memorie_ram["label"] if capacitate_memorie_ram else None)
-        row.append(price["value"] if price else None)
-        row.append(price["currency"] if price else None)
-        row.append(price["negotiable"] if price else None)
+    wb.save("olx-0-50-macbook+pro.xlsx")
 
-        lat = item["map"]["lat"]
-        lon = item["map"]["lon"]
-
-        row.append(lat)
-        row.append(lon)
-
-        #calculate synthetic indicator representing straight line distance from Otopeni to the location
-        distance = ((lat - otopeni_lat)**2 + (lon - otopeni_lon)**2)**0.5
-        row.append(distance)
-
-        row.append(item["location"]["city"]["name"])
-        row.append(item["location"]["region"]["name"])
-
-        row.append(f"=DATEDIF(D{current_row}, TODAY() , \"D\")")
-        row.append(f"=DATEDIF(E{current_row}, TODAY() , \"D\")")
-
-        row.append(item["promotion"]["highlighted"])
-
-        ws.append(row)
-
-        ws.cell(row=current_row, column=2).style = "Hyperlink"
-        ws.cell(row=current_row, column=2).hyperlink = item["url"]
-
-        ws.cell(row=current_row, column=4).style = date_style
-        ws.cell(row=current_row, column=5).style = date_style
-
-        
-        current_row += 1
-
-wb.save("olx-0-50-macbook+pro.xlsx")
+if __name__ == "__main__":
+    main()
