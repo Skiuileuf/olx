@@ -6,7 +6,7 @@ os.makedirs("api", exist_ok=True)
 offset = 0
 limit = 50
 max_results = 300
-query = "macbook+air+m1" # slightly encoded search query
+query = "macbook+air+m1" # slightly encoded search query ???
 
 for i in range(0, max_results, limit):
     offset = i

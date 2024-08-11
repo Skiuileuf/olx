@@ -153,7 +153,7 @@ def main():
 
             current_row += 1
 
-    wb.save("olx-0-50-macbook+pro.xlsx")
+    wb.save("olx-data.xlsx")
 
 if __name__ == "__main__":
     main()
